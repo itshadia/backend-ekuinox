@@ -80,14 +80,6 @@ const ProductSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
-  images: [{
-    url: String,
-    alt: String,
-    isMain: {
-      type: Boolean,
-      default: false
-    }
-  }],
   features: [{
     title: String,
     description: String,
