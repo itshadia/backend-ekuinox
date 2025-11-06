@@ -228,10 +228,14 @@ async function fetchWeather(lat, lng) {
   }
 }
 
-// ✅ CREATE CITY
+// ✅ CREATE CITY (assign owner + per-user duplicate check)
 exports.createCity = async (req, res) => {
   try {
     const { id, externalId, name, country, flagImg, lat, lng } = req.body;
+
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ error: "Authentication required to add a city." });
+    }
 
     if (!name) {
       return res.status(400).json({ error: "City name is required." });
@@ -242,8 +246,9 @@ exports.createCity = async (req, res) => {
     if (lat != null && lng != null) {
       const display = computeCityData(lat, lng);
       const weatherInfo = await fetchWeather(lat, lng);
-      
+
       cityData = {
+        user: req.user.id,
         id: id ?? null,
         externalId: externalId ?? null,
         name,
@@ -263,56 +268,49 @@ exports.createCity = async (req, res) => {
       try {
         const autoData = await autoCompleteCity(name);
         cityData = {
+          user: req.user.id,
           id: id ?? null,
           externalId: externalId ?? null,
           ...autoData,
         };
       } catch (autoError) {
-        return res.status(400).json({ 
-          error: `Could not auto-complete city data: ${autoError.message}. Please provide coordinates (lat, lng).`
+        return res.status(400).json({
+          error: `Could not auto-complete city data: ${autoError.message}. Please provide coordinates (lat, lng).`,
         });
       }
     }
 
-    // Check duplicates based on name + country (removed countryCode)
+    // Per-user duplicate check (same name + country for the same user)
     const existing = await City.findOne({
-      name: { $regex: new RegExp(`^${cityData.name}$`, 'i') },
-      country: cityData.country
+      name: { $regex: new RegExp(`^${cityData.name}$`, "i") },
+      country: cityData.country,
+      user: req.user.id,
     });
-    
+
     if (existing) {
-      console.warn('createCity: duplicate detected, returning existing city', {
-        name: cityData.name,
-        country: cityData.country,
-        existingId: existing._id,
-      });
+      console.warn("createCity: duplicate detected for user", req.user.id, existing._id);
       return res.status(200).json({
-        message: 'City already exists',
+        message: "City already exists for this user",
         data: formatCityResponse(existing),
       });
     }
 
     const city = await City.create(cityData);
     return res.status(201).json(formatCityResponse(city));
-    
   } catch (err) {
     console.error("createCity error:", err);
 
     if (err.code === 11000) {
-      console.warn('createCity: duplicate key error', err.keyValue || err.message);
-      try {
-        const existingRace = await City.findOne({
-          name: { $regex: new RegExp(`^${req.body.name}$`, 'i') },
-          country: { $exists: true }
-        });
-        if (existingRace) {
-          return res.status(200).json({
-            message: 'City already exists',
-            data: formatCityResponse(existingRace),
-          });
-        }
-      } catch (e) {}
-      return res.status(409).json({ error: 'City already exists.' });
+      console.error('Duplicate key error details:', err.keyValue || err.message);
+      console.error('User ID:', req.user?.id);
+      console.error('City data:', JSON.stringify(cityData, null, 2));
+      
+      // Check if it's a per-user duplicate (expected) or global duplicate (problem)
+      if (err.message && err.message.includes('user_1')) {
+        return res.status(409).json({ error: "You have already added this city." });
+      } else {
+        return res.status(409).json({ error: "City already exists in database." });
+      }
     }
 
     return res.status(500).json({ error: "Server error creating city." });
@@ -322,7 +320,8 @@ exports.createCity = async (req, res) => {
 // ✅ GET ALL CITIES
 exports.getCities = async (req, res) => {
   try {
-    const cities = await City.find().sort({ createdAt: -1 });
+    // Only return cities for the authenticated user
+    const cities = await City.find({ user: req.user.id }).sort({ createdAt: -1 });
     res.json(cities.map(formatCityResponse));
   } catch (err) {
     console.error("getCities error:", err);
@@ -333,7 +332,8 @@ exports.getCities = async (req, res) => {
 // ✅ GET ONE CITY
 exports.getCity = async (req, res) => {
   try {
-    const city = await City.findById(req.params.id);
+    // Only return city if it belongs to the authenticated user
+    const city = await City.findOne({ _id: req.params.id, user: req.user.id });
     if (!city) return res.status(404).json({ error: "City not found." });
     res.json(formatCityResponse(city));
   } catch (err) {
@@ -342,10 +342,10 @@ exports.getCity = async (req, res) => {
   }
 };
 
-// ✅ UPDATE CITY
+// ✅ UPDATE CITY - ensure user owns the city before updating
 exports.updateCity = async (req, res) => {
   try {
-    const city = await City.findById(req.params.id);
+    const city = await City.findOne({ _id: req.params.id, user: req.user.id });
     if (!city) return res.status(404).json({ error: "City not found." });
 
     const updatable = ["name", "country", "countryCode", "flag", "flagImg", "lat", "lng"];
@@ -377,7 +377,7 @@ exports.updateCity = async (req, res) => {
 // ✅ DELETE CITY
 exports.deleteCity = async (req, res) => {
   try {
-    const deleted = await City.findByIdAndDelete(req.params.id);
+    const deleted = await City.findOneAndDelete({ _id: req.params.id, user: req.user.id });
     if (!deleted) return res.status(404).json({ error: "City not found." });
     res.json({ message: "City deleted successfully." });
   } catch (err) {
@@ -389,7 +389,8 @@ exports.deleteCity = async (req, res) => {
 // ✅ REFRESH WEATHER + TIME
 exports.refreshCity = async (req, res) => {
   try {
-    const city = await City.findById(req.params.id);
+    // Only allow refreshing user's own cities
+    const city = await City.findOne({ _id: req.params.id, user: req.user.id });
     if (!city) return res.status(404).json({ error: "City not found." });
 
     const display = computeCityData(city.lat, city.lng);

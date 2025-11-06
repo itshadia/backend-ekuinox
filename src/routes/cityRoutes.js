@@ -8,8 +8,12 @@ const {
   deleteCity,
   refreshCity,
 } = require("../controllers/cityController");
+const { protect } = require('../middleware/auth');
 
 const router = express.Router();
+
+// All city routes require authentication (user-specific data)
+router.use(protect);
 
 router.post("/", createCity);
 router.get("/", getCities);
