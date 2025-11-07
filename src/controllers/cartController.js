@@ -6,7 +6,9 @@ const Product = require('../models/Product');
 // @access  Private
 exports.getCart = async (req, res, next) => {
   try {
-    const cart = await Cart.getActiveCart(req.user.id);
+    // Fetch cart with targeted populate (colors is embedded, so no extra populate needed)
+    const cart = await Cart.findOne({ user: req.user.id, status: 'active' })
+      .populate('items.product', 'name price sku images category colors'); // Includes full embedded colors array
 
     if (!cart) {
       return res.status(200).json({
@@ -19,9 +21,37 @@ exports.getCart = async (req, res, next) => {
       });
     }
 
+    // Format items for easier frontend access (include full colors array)
+    const formattedItems = cart.items.map(item => ({
+      _id: item._id,
+      productId: item.product._id,
+      name: item.product.name,
+      price: parseFloat(item.price) || 0, // Ensure numeric
+      quantity: item.quantity,
+      totalPrice: (parseFloat(item.price) || 0) * item.quantity, // Calculate per-item total
+      sku: item.product.sku,
+      category: item.product.category,
+      images: item.product.images || [], // General product images
+      colors: item.product.colors || [], // Full embedded colors array (e.g., [{ id: 'red', alt: 'Red color', thumb: 'red-thumb.jpg' }])
+      addedAt: item.addedAt
+    }));
+
+    // Recalculate totals in case of data inconsistencies
+    const total = formattedItems.reduce((sum, item) => sum + item.totalPrice, 0);
+    const itemCount = formattedItems.reduce((sum, item) => sum + item.quantity, 0);
+
     res.status(200).json({
       success: true,
-      data: cart
+      data: {
+        _id: cart._id,
+        user: cart.user,
+        items: formattedItems,
+        total: total.toFixed(2), // Format as string for currency
+        itemCount,
+        status: cart.status,
+        createdAt: cart.createdAt,
+        updatedAt: cart.updatedAt
+      }
     });
   } catch (error) {
     next(error);
@@ -70,7 +100,6 @@ exports.addToCart = async (req, res, next) => {
 
     // Populate product details
     await cart.populate('items.product', 'name price sku images category');
-
     res.status(200).json({
       success: true,
       data: cart
