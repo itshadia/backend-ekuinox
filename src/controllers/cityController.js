@@ -321,7 +321,7 @@ exports.createCity = async (req, res) => {
 exports.getCities = async (req, res) => {
   try {
     // Only return cities for the authenticated user
-    const cities = await City.find({ user: req.user.id }).sort({ createdAt: -1 });
+    const cities = await City.find().sort({ createdAt: -1 }).populate('user', 'name email'); // Optional: include user info
     res.json(cities.map(formatCityResponse));
   } catch (err) {
     console.error("getCities error:", err);
@@ -374,6 +374,8 @@ exports.updateCity = async (req, res) => {
   }
 };
 
+
+
 // ✅ DELETE CITY
 exports.deleteCity = async (req, res) => {
   try {
@@ -411,5 +413,37 @@ exports.refreshCity = async (req, res) => {
   } catch (err) {
     console.error("refreshCity error:", err);
     res.status(500).json({ error: "Server error refreshing city." });
+  }
+};
+
+// ✅ GET CITIES BY USER ID (Admin only)
+exports.getCitiesByUserId = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Validate userId format
+    if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid user ID format."
+      });
+    }
+
+    // Find all cities for the specified user
+    const cities = await City.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .populate('user', 'name email'); // Optional: include user info
+
+    res.json({
+      success: true,
+      count: cities.length,
+      data: cities.map(formatCityResponse)
+    });
+  } catch (err) {
+    console.error("getCitiesByUserId error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Server error fetching cities for user."
+    });
   }
 };

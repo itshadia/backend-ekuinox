@@ -7,6 +7,7 @@ const {
   updateCity,
   deleteCity,
   refreshCity,
+  getCitiesByUserId,
 } = require("../controllers/cityController");
 const { protect } = require('../middleware/auth');
 
@@ -19,6 +20,7 @@ router.post("/", createCity);
 router.get("/", getCities);
 router.get("/:id", getCity);
 router.put("/:id", updateCity);
+router.get("/user/:userId", getCitiesByUserId); // Admin only - get cities for specific user
 router.delete("/:id", deleteCity);
 router.post("/:id/refresh", refreshCity); // POST to refresh (could be PUT)
 

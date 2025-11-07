@@ -9,7 +9,6 @@ require('dotenv').config();
 const connectDB = require('./config/database');
 const errorHandler = require('./middleware/errorHandler');
 
-// Import routes
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const productRoutes = require('./routes/productRoutes');
@@ -18,8 +17,16 @@ const cityRoutes = require('./routes/cityRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const cartRoutes = require('./routes/cartRoutes');
 
-
 const app = express();
+
+// ✅ Allow All CORS — put this FIRST (before any other middleware)
+app.use(cors({
+  origin: true,           // dynamically allow all
+  credentials: true,      // allow cookies/authorization headers
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token']
+}));
+app.options('*', cors()); // handle preflight everywhere
 
 // Connect to MongoDB
 connectDB();
@@ -29,21 +36,13 @@ app.use(helmet());
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
 });
 app.use('/api/', limiter);
-
-// CORS configuration
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token']
-}));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -53,11 +52,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(compression());
 
 // Logging middleware
-if (process.env.NODE_ENV !== 'production') {
-  app.use(morgan('dev'));
-} else {
-  app.use(morgan('combined'));
-}
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 // Health check route
 app.get('/health', (req, res) => {
@@ -97,11 +92,10 @@ app.use('*', (req, res) => {
   });
 });
 
-// Error handling middleware (should be last)
+// Error handling middleware
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-
 const server = app.listen(PORT, () => {
   console.log(`
 ==> Ekuinox Backend Server is running!
@@ -111,18 +105,14 @@ const server = app.listen(PORT, () => {
   `);
 });
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err, promise) => {
-  console.log(`Error: ${err.message}`);
-  // Close server & exit process
-  server.close(() => {
-    process.exit(1);
-  });
+// Handle promise rejections & uncaught exceptions
+process.on('unhandledRejection', (err) => {
+  console.error(`Unhandled Rejection Error: ${err.message}`);
+  server.close(() => process.exit(1));
 });
 
-// Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
-  console.log(`Error: ${err.message}`);
+  console.error(`Uncaught Exception Error: ${err.message}`);
   console.log('Shutting down the server due to uncaught exception');
   process.exit(1);
 });
