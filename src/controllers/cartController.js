@@ -301,3 +301,74 @@ exports.getCartSummary = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Get cart products by user ID (Admin only)
+// @route   GET /api/cart/user/:userId
+// @access  Private/Admin
+exports.getCartByUserId = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+
+    // Validate userId format
+    if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid user ID format.'
+      });
+    }
+
+    // Fetch cart with full product details including colors
+    const cart = await Cart.findOne({ user: userId, status: 'active' })
+      .populate('items.product', 'name price sku images category colors')
+      .populate('user', 'name email');
+
+    if (!cart) {
+      return res.status(200).json({
+        success: true,
+        message: 'No active cart found for this user',
+        data: {
+          items: [],
+          total: 0,
+          itemCount: 0,
+          user: { _id: userId }
+        }
+      });
+    }
+
+    // Format items with full product details including colors
+    const formattedItems = cart.items.map(item => ({
+      _id: item._id,
+      productId: item.product._id,
+      name: item.product.name,
+      price: parseFloat(item.price) || 0,
+      quantity: item.quantity,
+      totalPrice: (parseFloat(item.price) || 0) * item.quantity,
+      sku: item.product.sku,
+      category: item.product.category,
+      images: item.product.images || [],
+      colors: item.product.colors || [], // Full colors array
+      addedAt: item.addedAt
+    }));
+
+    // Recalculate totals
+    const total = formattedItems.reduce((sum, item) => sum + item.totalPrice, 0);
+    const itemCount = formattedItems.reduce((sum, item) => sum + item.quantity, 0);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        _id: cart._id,
+        user: cart.user,
+        items: formattedItems,
+        total: total.toFixed(2),
+        itemCount,
+        status: cart.status,
+        createdAt: cart.createdAt,
+        updatedAt: cart.updatedAt
+      }
+    });
+  } catch (error) {
+    console.error('getCartByUserId error:', error);
+    next(error);
+  }
+};

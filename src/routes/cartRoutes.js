@@ -7,9 +7,10 @@ const {
   removeFromCart,
   clearCart,
   checkoutCart,
-  getCartSummary
+  getCartSummary,
+  getCartByUserId
 } = require('../controllers/cartController');
-const { protect } = require('../middleware/auth');
+const { protect, authorize } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -36,6 +37,7 @@ const updateCartItemValidation = [
 // Routes
 router.get('/', getCart);
 router.get('/summary', getCartSummary);
+router.get('/user/:userId', getCartByUserId); 
 router.post('/items', addToCartValidation, addToCart);
 router.put('/items/:itemId', updateCartItemValidation, updateCartItem);
 router.delete('/items/:itemId', removeFromCart);

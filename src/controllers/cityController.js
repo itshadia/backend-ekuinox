@@ -416,10 +416,28 @@ exports.refreshCity = async (req, res) => {
   }
 };
 
+// Helper function to calculate distance between two coordinates (Haversine formula)
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Earth's radius in kilometers
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distance = R * c; // Distance in kilometers
+
+  return Math.round(distance * 10) / 10; // Round to 1 decimal place
+}
+
 // ✅ GET CITIES BY USER ID (Admin only)
 exports.getCitiesByUserId = async (req, res) => {
   try {
     const { userId } = req.params;
+    const { userLat, userLng, sortBy = 'createdAt' } = req.query;
 
     // Validate userId format
     if (!userId.match(/^[0-9a-fA-F]{24}$/)) {
@@ -431,13 +449,54 @@ exports.getCitiesByUserId = async (req, res) => {
 
     // Find all cities for the specified user
     const cities = await City.find({ user: userId })
-      .sort({ createdAt: -1 })
       .populate('user', 'name email'); // Optional: include user info
+
+    let formattedCities = cities.map(formatCityResponse);
+
+    // If user location is provided, calculate distances and optionally sort
+    if (userLat && userLng) {
+      const lat = parseFloat(userLat);
+      const lng = parseFloat(userLng);
+
+      // Validate coordinates
+      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid coordinates. Latitude must be between -90 and 90, longitude between -180 and 180."
+        });
+      }
+
+      // Calculate distance for each city
+      formattedCities = formattedCities.map(city => ({
+        ...city,
+        distanceFromUser: city.lat && city.lng
+          ? calculateDistance(lat, lng, city.lat, city.lng)
+          : null,
+        distanceUnit: 'km'
+      }));
+
+      // Sort by distance if requested
+      if (sortBy === 'distance') {
+        formattedCities.sort((a, b) => {
+          if (a.distanceFromUser === null) return 1;
+          if (b.distanceFromUser === null) return -1;
+          return a.distanceFromUser - b.distanceFromUser;
+        });
+      } else {
+        // Sort by creation date (newest first)
+        formattedCities.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      }
+    } else {
+      // No user location provided, sort by creation date only
+      formattedCities.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }
 
     res.json({
       success: true,
-      count: cities.length,
-      data: cities.map(formatCityResponse)
+      count: formattedCities.length,
+      sortedBy: userLat && userLng && sortBy === 'distance' ? 'distance' : 'createdAt',
+      userLocation: userLat && userLng ? { lat: parseFloat(userLat), lng: parseFloat(userLng) } : null,
+      data: formattedCities
     });
   } catch (err) {
     console.error("getCitiesByUserId error:", err);
