@@ -34,6 +34,7 @@
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
     "node-fetch": "^3.3.2",
+    "stripe": "^19.3.0",
     "suncalc": "^1.9.0",
     "tz-lookup": "^6.1.25"
   },

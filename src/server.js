@@ -16,6 +16,8 @@ const countryRoutes = require('./routes/countryRoutes');
 const cityRoutes = require('./routes/cityRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const cartRoutes = require('./routes/cartRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
+const webhookRoutes = require('./routes/webhookRoutes');
 
 const app = express();
 
@@ -43,6 +45,9 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 app.use('/api/', limiter);
+
+// Webhook routes (before express.json middleware)
+app.use('/webhook', webhookRoutes);
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -72,6 +77,7 @@ app.use('/api/countries', countryRoutes);
 app.use('/api/cities', cityRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/cart', cartRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // Welcome route
 app.get('/', (req, res) => {
