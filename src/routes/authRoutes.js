@@ -8,6 +8,7 @@ const {
   updatePassword,
   logout,
   forgotPassword,
+  verifyOtp,
   resetPassword
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
@@ -82,10 +83,22 @@ const resetPasswordValidation = [
     .withMessage('New password must contain at least one lowercase letter, one uppercase letter, and one number')
 ];
 
+const verifyOtpValidation = [
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('otp')
+    .isLength({ min: 6, max: 6 })
+    .isNumeric()
+    .withMessage('OTP must be a 6-digit number')
+];
+
 // Routes
 router.post('/register', registerValidation, register);
 router.post('/login', loginValidation, login);
 router.post('/forgot-password', forgotPasswordValidation, forgotPassword);
+router.post('/verify-otp', verifyOtpValidation, verifyOtp);
 router.put('/reset-password', resetPasswordValidation, resetPassword);
 router.get('/me', protect, getMe);
 router.put('/updatedetails', protect, updateDetails);

@@ -2,6 +2,7 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { validationResult } = require('express-validator');
+const nodemailer = require('nodemailer'); // added
 
 // Generate JWT Token
 const generateToken = (id) => {
@@ -45,7 +46,7 @@ exports.register = async (req, res, next) => {
 
     const { firstName, lastName, name: singleName, email, password } = req.body;
 
-    // Build a name value from first/last when provided
+    
     const name = singleName || [firstName, lastName].filter(Boolean).join(' ').trim();
     if (!name) {
       return res.status(400).json({
@@ -54,7 +55,7 @@ exports.register = async (req, res, next) => {
       });
     }
 
-    // Check if user exists
+
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({
@@ -112,7 +113,7 @@ exports.login = async (req, res, next) => {
       });
     }
 
-    // Check if password matches
+    
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
       return res.status(401).json({
@@ -121,7 +122,7 @@ exports.login = async (req, res, next) => {
       });
     }
 
-    // Update last login
+    
     await user.updateLastLogin();
 
     sendTokenResponse(user, 200, res);
@@ -130,9 +131,7 @@ exports.login = async (req, res, next) => {
   }
 };
 
-// @desc    Forgot password - generate reset token
-// @route   POST /api/auth/forgot-password
-// @access  Public
+// REPLACE the existing forgotPassword function with the OTP version
 exports.forgotPassword = async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -147,28 +146,114 @@ exports.forgotPassword = async (req, res, next) => {
     const { email } = req.body;
     const user = await User.findOne({ email });
 
+    // For security, always return success message whether user exists or not
     if (!user) {
-      // For security, don't reveal whether the email exists
       return res.status(200).json({
         success: true,
-        message: 'If that email exists, a reset link has been sent'
+        message: 'If that email exists, an OTP has been sent'
       });
     }
 
-    // Create reset token
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+
+    // Store hashed OTP and expiry (10 minutes)
+    user.otpCode = otpHash;
+    user.otpExpire = Date.now() + 10 * 60 * 1000;
+    await user.save({ validateBeforeSave: false });
+
+    // Send OTP via email (nodemailer) - falls back to returning OTP in response for dev
+    try {
+      const transporter = nodemailer.createTransport({
+        host: process.env.EMAIL_HOST,
+        port: Number(process.env.EMAIL_PORT) || 587,
+        secure: process.env.EMAIL_SECURE === 'true', // true for 465, false for other ports
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS
+        }
+      });
+
+      const mailOptions = {
+        from: process.env.EMAIL_FROM || '"Ekuinox" <no-reply@ekuinox.com>',
+        to: user.email,
+        subject: 'Your password reset OTP',
+        text: `Your OTP for password reset is: ${otp}. It expires in 10 minutes.`,
+        html: `<p>Your OTP for password reset is: <strong>${otp}</strong></p><p>It expires in 10 minutes.</p>`
+      };
+
+      console.log('Sending OTP email to:', user.email); // Debug log
+      await transporter.sendMail(mailOptions);
+      console.log('OTP email sent successfully'); // Debug log
+      return res.status(200).json({
+        success: true,
+        message: 'If that email exists, an OTP has been sent'
+      });
+    } catch (mailErr) {
+      // In development, return the OTP so you can continue flow without SMTP
+      // Remove this behavior in production.
+      console.error('SMTP Error:', mailErr); // Debug log
+      return res.status(200).json({
+        success: true,
+        message: 'OTP generated (dev mode - SMTP failed)',
+        otp // dev only
+      });
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+// NEW: verifyOtp endpoint — verifies OTP and returns a one-time reset token (dev)
+exports.verifyOtp = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array()
+      });
+    }
+
+    const { email, otp } = req.body;
+    if (!email || !otp) {
+      return res.status(400).json({ success: false, message: 'Email and OTP are required' });
+    }
+
+    // Need to explicitly select OTP fields since they have select: false
+    const user = await User.findOne({ email }).select('+otpCode +otpExpire');
+    if (!user || !user.otpCode) {
+      return res.status(400).json({ success: false, message: 'Invalid OTP or email' });
+    }
+
+    // Check expiry
+    if (!user.otpExpire || user.otpExpire < Date.now()) {
+      return res.status(400).json({ success: false, message: 'OTP expired' });
+    }
+
+    const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+    if (otpHash !== user.otpCode) {
+      return res.status(400).json({ success: false, message: 'Invalid OTP' });
+    }
+
+    // OTP valid — generate one-time reset token to be used with resetPassword
     const resetToken = crypto.randomBytes(32).toString('hex');
     const resetTokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
 
-    // Set reset fields
     user.resetPasswordToken = resetTokenHash;
     user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
+    // clear OTP fields
+    user.otpCode = undefined;
+    user.otpExpire = undefined;
+
     await user.save({ validateBeforeSave: false });
 
-    // In a production app, send this via email. For now, return token for client flow.
+
     return res.status(200).json({
       success: true,
-      message: 'Password reset token generated',
-      // Return token for development usage
+      message: 'OTP verified. Use the provided token to reset password.',
       token: resetToken,
       expiresInMinutes: 10
     });
@@ -177,9 +262,6 @@ exports.forgotPassword = async (req, res, next) => {
   }
 };
 
-// @desc    Reset password using token
-// @route   PUT /api/auth/reset-password
-// @access  Public
 exports.resetPassword = async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -219,9 +301,7 @@ exports.resetPassword = async (req, res, next) => {
   }
 };
 
-// @desc    Get current logged in user
-// @route   GET /api/auth/me
-// @access  Private
+
 exports.getMe = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id);
